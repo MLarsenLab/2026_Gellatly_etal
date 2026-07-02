@@ -1,5 +1,8 @@
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(Matrix, Seurat, SeuratWrappers, scDblFinder, hdf5r)
+pacman::p_load(SingleCellExperiment, celda, Seurat, SeuratWrappers, ggplot2, cowplot, scater, patchwork, 
+               dplyr, sctransform, glmGamPoi, stringr, scCustomize, scDblFinder, singleCellTK, biomaRt,
+               clustree, hdf5r, rhdf5, sctransform, remotes, gtools)
+
 install_github("chris-mcginnis-ucsf/DoubletFinder")
 library(DoubletFinder)
 
@@ -224,6 +227,13 @@ formattedUMAP <- function(seuratObject){
     theme(axis.title = element_text(size = 15, face = "bold"), axis.text = element_text(size = 15, face = "bold"))
   aPlot <- LabelClusters(aPlot, id = "ident", fontface = "bold", color = "black", size = 7)
   return(aPlot)
+}
+formattedDotPlot <- function(seuratObject, features = c(), scale_max = 100, textScale.pct = 100, dot.scale = 6){
+  DotPlot(seuratObject, features = features, scale.min = 0, scale.max = scale_max, dot.scale = dot.scale) +
+    theme(axis.title = element_text(size = (15 * (textScale.pct/100)), face = "bold"), axis.text = element_text(size = (15 * (textScale.pct/100)), face = "bold")) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+    theme(legend.title =  element_text(size = (9 * (textScale.pct/100)), face = "bold"))
 }
 highlightMeta <- function(seuratObject, path = ".", meta = "orig.ident", type = "PDF"){
   
@@ -859,20 +869,21 @@ list60S <- c("Rpl3", "Rpl3l", "Rpl4", "Rpl5", "Rpl6", "Rpl7", "Rpl7a", "Rpl8", "
              "Rpl41", "Rplp0", "Rplp1", "Rplp2")
 listAllS <- unique(c(list40S, list60S))
 
+localPath <- sprintf("%s/RibosomeGenes", projectPath)
+dir.create(localPath)
+
 for(aTimepoint in c("2WeekIR", "4WeekIR", "8WeekIR", "12WeekIR")){
   id1 <- aTimepoint
   id2 <- "Homeostatic"
   dataName <- sprintf("%s_vs_%s", id1, id2)
   aDF <- FindMarkers(aSeuratSMG, ident.1 = id1, ident.2 = id2, min.pct = 0, logfc.threshold = 0, only.pos = FALSE)
-  write.csv(aDF, file = sprintf("%s/%s_All_Genes.csv", localPath, dataName))
   aDFFiltered <- aDF[listAllS, ]
-  write.csv(aDFFiltered, file = sprintf("%s/%s_AllRibosomeGenes.csv", localPath, dataName))
+  write.csv(aDFFiltered, file = sprintf("%s/%s_AllSMGRibosomeGenes.csv", localPath, dataName))
   
   dataName <- sprintf("%s_vs_%s", id2, id1)
   aDF <- FindMarkers(aSeuratSMG, ident.1 = id2, ident.2 = id1, min.pct = 0, logfc.threshold = 0, only.pos = FALSE)
-  write.csv(aDF, file = sprintf("%s/%s_All_Genes.csv", localPath, dataName))
   aDFFiltered <- aDF[listAllS, ]
-  write.csv(aDFFiltered, file = sprintf("%s/%s_AllRibosomeGenes.csv", localPath, dataName))
+  write.csv(aDFFiltered, file = sprintf("%s/SMG_%s_AllRibosomeGenes.csv", localPath, dataName))
 }
 #Create SMG Acinar subset---------------------------
 #The Acinar subset was created in steps, first step was acinar + dividing cells from epi subset
@@ -937,14 +948,6 @@ aSeuratAcinar$seurat_clusters2[aSeuratAcinar$seurat_clusters == '3'] <- "3"
 aSeuratAcinar$seurat_clusters2[aSeuratAcinar$seurat_clusters == '4'] <- "4"
 aSeuratAcinar$seurat_clusters2[aSeuratAcinar$seurat_clusters == '6'] <- "5"
 
-aSeuratAcinar$Subpop_Metascape <- "Missing"
-aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '0'] <- "Active"
-aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '1'] <- "Baseline"
-aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '2'] <- "Stressed"
-aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '3'] <- "High Metabolic_1"
-aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '4'] <- "High Metabolic_2"
-aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '5'] <- "Proliferating"
-
 saveRDS(aSeuratAcinar, file = "seurat_Acinar.RDS")
 
 #Figure 4A-----------------------------------
@@ -974,6 +977,22 @@ write.csv(aDF, file = sprintf("%s/SMG_Subcluster/clusterCellCounts.csv", project
 
 #Figure 4C-------------------------------
 aSeuratAcinar <- readRDS(file = "seurat_Acinar.RDS")
+
+for(aCluster in unique(aSeuratAcinar$seurat_clusters2)){
+  aDFMarkers <- FindAllMarkers(aSeuratAcinar, min.pct = 0.25, 
+                            logfc.threshold = 0.25, only.pos = TRUE)
+  aDFMarkers <- aDFMarkers[aDFMarkers$p_val_adj <= 0.05, ] #Filter for less than p_val_adj <- 0.5
+  write.csv(aDFMarkers, file = sprintf("%s/SMG_Subcluster/DEG/SMG_Acinar_DEG.csv", projectPath))
+}
+
+aSeuratAcinar$Subpop_Metascape <- "Missing"
+aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '0'] <- "Active"
+aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '1'] <- "Baseline"
+aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '2'] <- "Stressed"
+aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '3'] <- "High Metabolic_1"
+aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '4'] <- "High Metabolic_2"
+aSeuratAcinar$Subpop_Metascape[aSeuratAcinar$seurat_clusters2 == '5'] <- "Proliferating"
+
 Idents(aSeuratAcinar) <- "Subpop_Metascape"
 localPath <- sprintf("%s/SMG_Subcluster", projectPath)
 dir.create(localPath)
@@ -985,6 +1004,7 @@ dev.off()
 #Figure 4D-4I and Appendix------------------------------------------------
 aSeuratAcinar <- readRDS(file = "seurat_Acinar.RDS")
 
+#DEG created above used with metascape as previously described
 geneList <- getAllDEGGeneNames(aSeuratAcinar, aIdent2 = "Homeostatic", aMetadata = "dataset")
 
 localPath <- sprintf("%s/SMG_Subcluster/DEG/Metascape_Custom", projectPath)
@@ -1054,3 +1074,211 @@ tiff(file = sprintf("%s/Dotplot_SMG_Subcluster_Cluster5_division.tiff", localPat
      res = 400, height = 7, width = 10, compression = "none")  
 formattedDotPlot(aSeuratAcinar, features = cluster_5_division, textScale.pct = 200, dot.scale = 14) 
 dev.off()
+
+#Figure 5A, 5B------------------------------------------
+
+aSeuratC57Epi <- readRDS(file = "seurat_Episubset.RDS")
+aSeuratSL <- subset(aSeuratC57Epi, ID %in% c("SL Mucinous", "SL Serous"))
+aSeuratSL <- PrepSCTFindMarkers(aSeuratSMG)
+aSeuratSL <- SCTransform(aSeuratSMG)
+
+#List of stress genes
+#https://www.sciencedirect.com/science/article/pii/S3050620425000417?via%3Dihub
+# PMID: 40766395
+# Unfolded Protein Response (UPR)
+# DNA Damage Response (DDR)
+# Oxidative Stress Response  (OSR)
+# Heat Shock Response (HSR)
+# Peroxisome Proliferator Activated Receptor Alpha (PPA)
+# Apoptosis (APO)
+# Autophagy (AUT)
+# Cell Cycle Arrest (CCA)
+
+stressList <- list(x = "")
+stressList[["UPR"]] <- convert_human_to_mouse(c("ATF6", "XBP1", "HSPA5", "DDIT3", "ERN1", "EIF2AK3", "ATF4"))
+stressList[["DDR"]] <- convert_human_to_mouse(c("TP53", "ATM", "CHK2", "BRCA1", "RAD51", "BRCA2", "MDM2", "CHK1", "NBN"))
+stressList[["OSR"]] <- convert_human_to_mouse(c("SOD1", "GPX1", "CAT", "NFE2L2", "HMOX1", "GSR", "NQO1", "PRDX1", "TXN", "GCLC"))
+stressList[["HSR"]] <- convert_human_to_mouse(c("HSPA1A", "HSP90AA1", "DNAJB1", "HSPB1", "HSPH1", "HSPA8", "DNAJC3", "CRYAB"))
+stressList[["PPA"]] <- convert_human_to_mouse(c("ACAA1", "ACADM", "ACADVL", "ACOX1", "ANGPTL4", "CPT1A", "CPT2", "FABP4", "LPL", "PDK4", "PLIN2", "PPARGC1A", "CD36"))
+stressList[["APO"]] <- convert_human_to_mouse(c("CASP3", "BAX", "BCL2", "CASP8", "CASP9", "FAS", "FADD", "CYCS", "BID"))
+stressList[["AUT"]] <- convert_human_to_mouse(c("ATG5", "ATG7", "ATG12", "SQSTM1", "BECN1", "ULK1", "AMBRA1", "LAMP2", "BCL2"))
+stressList[["CCA"]] <- convert_human_to_mouse(c("CDKN1A", "TP53", "RB1", "GADD45A", "CDK2", "CCNE1", "CDK4", "CHEK1", "CHEK2"))
+stressList[["x"]] <- NULL
+
+for(aProcess in names(stressList)){
+  for(aID in unique(aSeuratSL$ID)){
+    aSeurat <- subset(aSeuratSL, ID == aID)
+    pdf(file = sprintf("%s/Stress_Markers_%s_%s.pdf", localPath, aID, aProcess), width = 10, height = 7)
+    print(DotPlot(aSeurat, features = stressList[[aProcess]], scale.min = 0, scale.max = 100))
+    dev.off()
+    rm(aSeurat)
+  }
+}
+
+#Find any of the stress list within DEG of SL timepoints
+masterDEGList <- list(tmp = 1)
+Idents(aSeuratSL) <- "dataset"
+for(aID in c("SL Mucinous", "SL Serous")){
+  aSeurat <- subset(aSeuratSL, ID == aID)
+  for(aDataset in c("2WeekIR", "4WeekIR", "8WeekIR", "12WeekIR")){
+    id1 <- sprintf("%s", aDataset)
+    id2 <- sprintf("Homeostatic")
+    dataName <- sprintf("%s_%s_vs_%s", aID, id1, id2)
+    aDF <- FindMarkers(aSeurat, ident.1 = id1, ident.2 = id2, min.pct = 0.25, logfc.threshold = 0.25, only.pos = TRUE)
+    aDF <- aDF[aDF$p_val_adj <= 0.05, ]
+    masterDEGList[[dataName]] <-  rownames(aDF)
+    
+    dataName <- sprintf("%s_%s_vs_%s", aID, id2, id1)
+    aDF <- FindMarkers(aSeurat, ident.1 = id2, ident.2 = id1, min.pct = 0.25, logfc.threshold = 0.25, only.pos = TRUE)
+    aDF <- aDF[aDF$p_val_adj <= 0.05, ]
+    masterDEGList[[dataName]] <-  rownames(aDF)
+    
+  }
+}
+masterDEGList$tmp <- NULL
+
+fullList <- c()
+for(aProcess in names(stressList)){
+  fullList <- c(fullList, stressList[[aProcess]])
+}
+fullList <- unique(fullList)
+
+foundList <- c()
+for(aData in names(masterDEGList)){
+  aList <- fullList[fullList %in% masterDEGList[[aData]]]
+  foundList <- c(foundList, aList)
+}
+foundList <- unique(foundList)
+
+#Manualy sorted genes from foundList
+sortedList <- c("Eif2ak3", "Ddit3", "Hspa5", "Gclc", "Txn1", "Prdx1", "Gpx1", "Sod1", "Dnajc3", "Hspa8",
+                "Hsp90aa1", "Plin2", "Acox1", "Acaa1a", "Cycs", "Bax", "Lamp2", "Sqstm1", "Cdkn1a")
+
+localPath <- sprintf("%s/SL/Figures", projectPath)
+Idents(aSeuratSL) <- "dataset"
+for(aID in c("SL Serous", "SL Mucinous")){
+  aSeurat <- subset(aSeuratSL, ID == aID)
+  tiff(file = sprintf("%s/DotPlot_Stress_%s.tiff", localPath, aID), units = "in", 
+       res = 400, height = 7, width = 10, compression = "none")
+  print(formattedDotPlot(aSeurat, features = sortedList, textScale.pct = 150, dot.scale = 11))
+  dev.off()
+  rm(aSeurat)
+}
+
+#Figure 5C-5D, 5G------------------------------
+
+aSeuratC57Epi <- readRDS(file = "seurat_Episubset.RDS")
+aSeuratSL <- subset(aSeuratC57Epi, ID %in% c("SL Mucinous", "SL Serous"))
+aSeuratSL <- PrepSCTFindMarkers(aSeuratSMG)
+aSeuratSL <- SCTransform(aSeuratSMG)
+
+localPath <- sprintf("%s/SL/Custom/DEG", projectPath)
+Idents(aSeuratSL) <- "dataset"
+for(aID in c("SL Mucinous", "SL Serous")){
+  aSeurat <- subset(aSeuratSL, ID == aID)
+  for(aDataset in unique(aSeurat$dataset)){
+    if(aDataset == "Homeostatic"){next}
+    aDF <- FindMarkers(aSeurat, ident.1 = aDataset, ident.2 = "Homeostatic", min.pct = 0.25, logfc.threshold = 0.25, only.pos = TRUE)
+    aDF <- aDF[aDF$p_val_adj <= 0.05, ]
+    write.csv(aDF, file = sprintf("%s/%s %s vs Homeostatic.csv", localPath, aID, aDataset))
+  }
+}
+
+Idents(aSeuratSL) <- "dataset"
+localPath <- sprintf("%s/SL/Custom/Metascape", projectPath)
+for(aID in c("SL Mucinous", "SL Serous"))
+{
+  aSeurat <- subset(aSeuratSL, ID == aID)
+  geneList <- getAllDEGGeneNames(aSeurat, aIdent2 = "Homeostatic", aMetadata = "dataset")
+  
+  for(aDataset in unique(aSeurat$dataset)){
+    if(aDataset == "Homeostatic") {next}
+    DotPlotFromEnrichment(aSeurat, 
+                          FileName = sprintf("%s/%s %s vs Homeostatic metascape_enrichment.csv", localPath, aID, aDataset),
+                          outputPath = sprintf("%s/Plots", localPath), 
+                          outputPrefix = sprintf("Dotplot %s %s vs Homeostatic Filtered", aID, aDataset),
+                          title = sprintf("%s %s vs Homeostatic", aID, aDataset),
+                          filterGenes = geneList)
+    
+    DotPlotFromEnrichment(aSeurat, 
+                          FileName = sprintf("%s/%s %s vs Homeostatic metascape_enrichment.csv", localPath, aID, aDataset),
+                          outputPath = sprintf("%s/Plots", localPath), 
+                          outputPrefix = sprintf("Dotplot %s %s vs Homeostatic Filtered Top10", aID, aDataset),
+                          title = sprintf("%s %s vs Homeostatic", aID, aDataset),
+                          filterGenes = geneList,
+                          topCount = 10)
+    
+    DotPlotFromEnrichment(aSeurat, 
+                          FileName = sprintf("%s/%s %s vs Homeostatic metascape_enrichment.csv", localPath, aID, aDataset),
+                          outputPath = sprintf("%s/Plots", localPath), 
+                          outputPrefix = sprintf("Dotplot %s %s vs Homeostatic UnFiltered", aID, aDataset),
+                          title = sprintf("%s %s vs Homeostatic", aID, aDataset))
+  }
+}
+
+localPath <- sprintf("%s/SL/Figures", projectPath)
+
+aSeurat <- subset(aSeuratSL, ID == "SL Mucinous")
+aSeurat <- SCTransform(aSeurat)
+aSeurat <- PrepSCTFindMarkers(aSeurat)
+translation_Muc_2Week <- c("Rpn1", "Hspa5", "Calr", "Sec62", "P4hb", "Rrbp1", "Hsp90b1", "Sec24d", "Hsp90ab1", "Hspa8")
+translation_Muc_12Week <- c("Rpn1", "Sec62", "Rrbp1", "Hsp90ab1", "Hspa8", "Agr2", "Dnajc1", "Atp2a3", "Pdia3", "Edem3")
+tiff(file = sprintf("%s/DotPlot_SL_Mucinous_Translation.tiff", localPath), units = "in", 
+     res = 400, height = 7, width = 10, compression = "none")  
+print(formattedDotPlot(aSeurat, features = unique(c(translation_Muc_2Week, translation_Muc_12Week)), textScale.pct = 150, dot.scale = 11))
+dev.off()
+
+aSeurat <- subset(aSeuratSL, ID == "SL Serous")
+aSeurat <- SCTransform(aSeurat)
+aSeurat <- PrepSCTFindMarkers(aSeurat)
+translation_Ser_2Week <- c("Lars2", "Chrm3", "Rps15", "Rpl13a", "mt-Rnr1", "Pde4d", "Rps29", "Rps17", "Rps12", "Rpl41")
+translation_Ser_12Week <- c("Lars2", "Rpl13a", "mt-Rnr1", "Rps29", "Rpl41", "Rps8", "Rplp1", "Rpl37", "mt-Rnr2", "Rpsa")
+tiff(file = sprintf("%s/DotPlot_SL_Serous_Translation.tiff", localPath), units = "in", 
+     res = 400, height = 7, width = 10, compression = "none")  
+print(formattedDotPlot(aSeurat, features = unique(c(translation_Ser_2Week, translation_Ser_12Week)), textScale.pct = 150, dot.scale = 11))
+dev.off()
+
+apoptosis_Ser_2Week <- c("P4hb", "Rack1", "Rpl26", "Rps3", "Tpt1")
+apoptosis_Ser_12Week <- c("Ifi27l2a", "Ifi27", "Nupr1", "Tmbim6", "Selenok", "Itm2b")
+tiff(file = sprintf("%s/DotPlot_SL_Serous_Apoptosis.tiff", localPath), units = "in", 
+     res = 400, height = 7, width = 10, compression = "none")  
+print(formattedDotPlot(aSeurat, features = unique(c(apoptosis_Ser_2Week, apoptosis_Ser_12Week)), textScale.pct = 150, dot.scale = 11))
+dev.off()
+
+
+
+#Figure 5E, 5F-------------------------------------------
+
+aSeuratC57Epi <- readRDS(file = "seurat_Episubset.RDS")
+aSeuratSL <- subset(aSeuratC57Epi, ID %in% c("SL Mucinous", "SL Serous"))
+aSeuratSL <- PrepSCTFindMarkers(aSeuratSMG)
+aSeuratSL <- SCTransform(aSeuratSMG)
+
+#Find All Ribosome genes
+list40S <- c("Rpsa", "Rps2", "Rps3", "Rps3a", "Rps4x", "Rps4y1", "Rps4y2", "Rps5", "Rps6", "Rps7", "Rps8", 
+             "Rps9", "Rps10", "Rps11", "Rps12", "Rps13", "Rps14", "Rps15", "Rps15a", "Rps16", "Rps17", "Rps18", 
+             "Rps19", "Rps20", "Rps21", "Rps23", "Rps24", "Rps25", "Rps26", "Rps27", "Rps27a", "Rps28", "Rps29", 
+             "Rps30", "Rack1")
+list60S <- c("Rpl3", "Rpl3l", "Rpl4", "Rpl5", "Rpl6", "Rpl7", "Rpl7a", "Rpl8", "Rpl9", "Rpl10", "Rpl10a", "Rpl11", 
+             "Rpl12", "Rpl13", "Rpl13a", "Rpl14", "Rpl15", "Rpl17", "Rpl18", "Rpl18a", "Rpl19", "Rpl21", "Rpl22", 
+             "Rpl23", "Rpl23a", "Rpl24", "Rpl26", "Rpl27", "Rpl27a", "Rpl28", "Rpl29", "Rpl30", "Rpl31", "Rpl32", 
+             "Rpl34", "Rpl35", "Rpl35a", "Rpl36", "Rpl36a", "Rpl36al", "Rpl37", "Rpl37a", "Rpl38", "Rpl39", "Rpl40", 
+             "Rpl41", "Rplp0", "Rplp1", "Rplp2")
+listAllS <- unique(c(list40S, list60S))
+
+localPath <- sprintf("%s/RibosomeGenes", projectPath)
+dir.create(localPath)
+localPath <- sprintf("%s/SL/Data", projectPath)
+
+for(aID in unique(aSeuratSL$ID)){
+  aSeurat <- subset(aSeuratSL, ID == aID)
+  for(aTimepoint in c("2WeekIR", "4WeekIR", "8WeekIR", "12WeekIR")){
+    id1 <- aTimepoint
+    id2 <- "Homeostatic"
+    dataName <- sprintf("%s_%s_vs_%s", aID, id1, id2)
+    aDF <- FindMarkers(aSeurat, ident.1 = id1, ident.2 = id2, min.pct = 0, logfc.threshold = 0, only.pos = FALSE)
+    aDFFiltered <- aDF[listAllS, ]
+    write.csv(aDFFiltered, file = sprintf("%s/%s_AllRibosomeGenes.csv", localPath, dataName))
+  }
+  rm(aSeurat)
+}
