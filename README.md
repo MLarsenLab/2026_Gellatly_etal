@@ -1,0 +1,3 @@
+fastqToCellbender.sh takes fastq files and processes the files through cellranger  and then cellbender for loading into seurat. fastqToCellbender is a slerm batch script but can be run as a Linux script. fastqToCellbender needs cellranger 8.0.0 and cellbender 0.3.0 environment already setup on the system and the reference genome in the ./Reference_Genome/GRCm39 folder. See cellranger and cellbender documentation for setup instructions. The fastq files need to be put in subdirectory 'fastq'. The script will create a cellranger and cellbender directories with respective contents.
+
+Gellatly_2026.R contains the R code for processing, integration and figure generation for the paper. 
